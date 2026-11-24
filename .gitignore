@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets: keep keys out of git (copy .env.example to .env.local)
+.env*
+!.env.example
+
+# Local tool settings and deploy links
+.claude/
+.vercel
