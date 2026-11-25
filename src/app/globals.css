@@ -625,3 +625,22 @@ textarea.input{height:auto;padding:10px 12px;resize:vertical}
 .print-toggle.on{color:var(--ink-2);border-color:#cfe5d6}
 .print-toggle.on i{background:var(--green);color:#fff}
 @media (max-width:600px){.print-toggle span{display:none}}
+
+/* ---------- New-order alarm ---------- */
+.alarm-backdrop{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:16px;background:rgba(31,21,16,.6);backdrop-filter:blur(3px);animation:fade .2s}
+.alarm-card{width:min(520px,100%);background:var(--surface);border-radius:22px;padding:28px 26px 22px;text-align:center;box-shadow:var(--shadow-lg);border:3px solid var(--brand)}
+.alarm-card.is-ringing{animation:alarmPulse 1.6s ease-in-out infinite}
+@keyframes alarmPulse{0%,100%{box-shadow:0 0 0 0 rgba(181,83,31,.55),var(--shadow-lg)}50%{box-shadow:0 0 0 18px rgba(181,83,31,0),var(--shadow-lg)}}
+.alarm-bell{width:72px;height:72px;margin:0 auto 12px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff}
+.alarm-card.is-ringing .alarm-bell{animation:alarmShake .5s ease-in-out infinite}
+@keyframes alarmShake{0%,100%{transform:rotate(0)}25%{transform:rotate(-14deg)}75%{transform:rotate(14deg)}}
+.alarm-kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);font-weight:700}
+.alarm-card h2{font-family:var(--serif);font-size:30px;margin:4px 0 14px}
+.alarm-list{list-style:none;margin:0 0 18px;padding:0;text-align:left;display:grid;gap:8px}
+.alarm-list li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);font-size:14px}
+.alarm-list small{display:block;color:var(--ink-3);font-size:12.5px;margin-top:2px}
+.alarm-list b{font-size:16px;white-space:nowrap}
+.alarm-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.alarm-actions .btn{height:44px;padding:0 18px;font-size:14.5px}
+.sound-unlock{position:fixed;z-index:85;left:50%;bottom:20px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 18px;border:0;border-radius:24px;background:var(--brand);color:#fff;font-weight:650;font-size:14px;box-shadow:var(--shadow-lg);cursor:pointer;animation:rise .3s}
+@media (prefers-reduced-motion:reduce){.alarm-card.is-ringing,.alarm-card.is-ringing .alarm-bell{animation:none}}

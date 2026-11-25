@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BarChart3, CalendarDays, Coffee, ExternalLink, LayoutDashboard, LogOut, Menu as MenuIcon, Settings2, ShoppingBag, Armchair, X, Bell, BellOff, Printer, UserCog, Boxes, History, CalendarClock, Package, Tags, Factory } from "lucide-react";
 import { createClient } from "@/lib/supabase/browser";
-import { ACTIVE_ORDER, api, isAdminOrder, type Row } from "./lib";
+import { ACTIVE_ORDER, api, formatPrice, isAdminOrder, tableText, type Row } from "./lib";
+import { audioReady, chime, startAlarm, stopAlarm, unlockAudio } from "./alarm";
 import { ConfirmProvider, ToastProvider, useToast } from "./ui";
 import { printReceipt } from "./print";
 import { Overview } from "./overview";
@@ -50,20 +51,6 @@ export type Live = {
   go: (section: Section) => void;
 };
 
-function chime() {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    [880, 1175].forEach((freq, i) => {
-      const osc = ctx.createOscillator(); const gain = ctx.createGain();
-      osc.frequency.value = freq; osc.type = "sine";
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.16);
-      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + i * 0.16 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.16 + 0.35);
-      osc.connect(gain).connect(ctx.destination); osc.start(ctx.currentTime + i * 0.16); osc.stop(ctx.currentTime + i * 0.16 + 0.4);
-    });
-  } catch {}
-}
-
 function Shell({ adminName, email }: { adminName: string; email: string }) {
   const toast = useToast();
   const [section, setSection] = useState<Section>("overview");
@@ -75,6 +62,18 @@ function Shell({ adminName, email }: { adminName: string; email: string }) {
   const seen = useRef<Set<string> | null>(null);
   const soundRef = useRef(sound);
   soundRef.current = sound;
+  // New-order alarm: ids of orders being announced, whether the ring is playing, and whether sound is unlocked.
+  const [alarm, setAlarm] = useState<string[] | null>(null);
+  const [ringing, setRinging] = useState(false);
+  const [soundReady, setSoundReady] = useState(false);
+  useEffect(() => {
+    const unlock = () => { if (unlockAudio()) setSoundReady(true); else window.setTimeout(() => setSoundReady(audioReady()), 200); };
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => { window.removeEventListener("pointerdown", unlock); window.removeEventListener("keydown", unlock); stopAlarm(); };
+  }, []);
+  const silence = useCallback(() => { stopAlarm(); setRinging(false); }, []);
+  const dismissAlarm = useCallback(() => { stopAlarm(); setRinging(false); setAlarm(null); }, []);
   // Print the bill when an order is completed. Saved per device, since printers belong to a device.
   const [autoPrint, setAutoPrint] = useState(true);
   const autoPrintRef = useRef(autoPrint);
@@ -98,8 +97,9 @@ function Shell({ adminName, email }: { adminName: string; email: string }) {
       if (seen.current) {
         const fresh = list.filter((x) => !seen.current!.has(x.id) && !isAdminOrder(x));
         if (fresh.length) {
-          toast("info", fresh.length === 1 ? `New order ${fresh[0].order_number} from ${fresh[0].customer_name}` : `${fresh.length} new orders`);
-          if (soundRef.current) chime();
+          // New website order: big alert on screen and a loud ring for 1 minute (until someone stops it).
+          setAlarm((current) => [...(current || []), ...fresh.map((x) => x.id)]);
+          if (soundRef.current) { startAlarm(60, () => setRinging(false)); setRinging(true); }
         }
       }
       seen.current = new Set(list.map((x) => x.id));
@@ -109,7 +109,8 @@ function Shell({ adminName, email }: { adminName: string; email: string }) {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 20000);
+    // Check every 10 seconds, even when the tab is in the background, so the alarm can ring.
+    const timer = window.setInterval(() => void refresh(), 10000);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
@@ -151,7 +152,12 @@ function Shell({ adminName, email }: { adminName: string; email: string }) {
   const live: Live = { orders, reservations, loaded, refresh, updateOrder, updateReservation, go };
 
   async function signOut() { try { await createClient().auth.signOut(); } finally { window.location.href = "/login"; } }
-  function toggleSound() { const next = !sound; setSound(next); try { localStorage.setItem("cc-admin-sound", next ? "on" : "off"); } catch {} if (next) chime(); }
+  function toggleSound() { const next = !sound; setSound(next); try { localStorage.setItem("cc-admin-sound", next ? "on" : "off"); } catch {} if (next) { unlockAudio(); chime(); } else silence(); }
+
+  // Orders being announced. Once none of them is still waiting ("Order Placed"), the alarm stops by itself.
+  const alarmOrders = (alarm || []).map((id) => orders.find((o) => o.id === id)).filter((o): o is Row => !!o && o.status === "Order Placed");
+  useEffect(() => { if (alarm && loaded && alarmOrders.length === 0) dismissAlarm(); }, [alarm, alarmOrders.length, loaded, dismissAlarm]);
+  async function acceptAll() { silence(); for (const o of alarmOrders) await updateOrder(o.id, { status: "Order Confirmed" }); setAlarm(null); }
 
   const groups = [...new Set(NAV.map((n) => n.group))];
   const current = NAV.find((n) => n.id === section)!;
@@ -215,6 +221,35 @@ function Shell({ adminName, email }: { adminName: string; email: string }) {
           {section === "settings" && <SettingsSection />}
         </main>
       </div>
+
+      {sound && !soundReady && (
+        <button className="sound-unlock" onClick={() => { unlockAudio(); chime(); setSoundReady(true); }}>
+          <Bell size={16} /> Tap here to turn on new-order sound
+        </button>
+      )}
+
+      {alarmOrders.length > 0 && (
+        <div className="alarm-backdrop" role="alertdialog" aria-modal="true" aria-label="New order">
+          <div className={`alarm-card ${ringing ? "is-ringing" : ""}`}>
+            <div className="alarm-bell"><Bell size={34} /></div>
+            <span className="alarm-kicker">{ringing ? "Ringing · new order" : "New order waiting"}</span>
+            <h2>{alarmOrders.length === 1 ? `Order ${alarmOrders[0].order_number}` : `${alarmOrders.length} new orders`}</h2>
+            <ul className="alarm-list">
+              {alarmOrders.slice(0, 4).map((o) => (
+                <li key={o.id}>
+                  <div><strong>{o.order_number}</strong> · {o.customer_name}<small>{o.order_type === "Home Delivery" ? "Delivery" : o.order_type}{o.table_number ? ` · ${tableText(o.table_number)}` : ""} · {(o.order_items || []).map((i: Row) => `${i.quantity}× ${i.product_name}`).join(", ")}</small></div>
+                  <b>{formatPrice(o.total_amount)}</b>
+                </li>
+              ))}
+            </ul>
+            <div className="alarm-actions">
+              {ringing && <button className="btn btn-ghost" onClick={silence}><BellOff size={16} /> Stop sound</button>}
+              <button className="btn btn-ghost" onClick={() => { dismissAlarm(); go("orders"); }}>View orders</button>
+              <button className="btn btn-primary" onClick={acceptAll}>{alarmOrders.length === 1 ? "Accept order" : "Accept all"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
